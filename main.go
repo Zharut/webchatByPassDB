@@ -10,10 +10,18 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 )
 
 var db *sql.DB
 var mu sync.Mutex
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+var clients = make(map[*websocket.Conn]bool)
+var broadcast = make(chan Message)
 
 type Room struct {
 	ID     int    `json:"id"`
@@ -37,6 +45,8 @@ func main() {
     }
     defer db.Close()
 
+	
+
     createTables()
 
     router := mux.NewRouter()
@@ -44,6 +54,9 @@ func main() {
     router.HandleFunc("/rooms", roomsHandler).Methods("GET", "POST")
     router.HandleFunc("/rooms/{id}", deleteRoomHandler).Methods("DELETE")
     router.HandleFunc("/rooms/{id}/messages", messagesHandler).Methods("GET", "POST")
+	router.HandleFunc("/ws", handleConnections)
+
+	go handleMessages()
 
     // Serve static files
     router.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./static/"))))
@@ -128,5 +141,49 @@ func messagesHandler(w http.ResponseWriter, r *http.Request) {
 			messages = append(messages, msg)
 		}
 		json.NewEncoder(w).Encode(messages)
+	}
+}
+
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("Error upgrading to websocket: %v", err)
+		return
+	}
+	defer ws.Close()
+
+	clients[ws] = true
+
+	for {
+		var msg Message
+		err := ws.ReadJSON(&msg)
+		if err != nil {
+			log.Printf("Error reading json: %v", err)
+			delete(clients, ws)
+			break
+		}
+
+		msg.Time = time.Now()
+		// Broadcast ข้อความไปยังทุกคนที่เชื่อมต่อ
+		broadcast <- msg
+
+		// บันทึกข้อความในฐานข้อมูล
+		mu.Lock()
+		db.Exec("INSERT INTO messages (room_id, sender, text, time) VALUES (?, ?, ?, ?)", msg.RoomID, msg.Sender, msg.Text, msg.Time)
+		mu.Unlock()
+	}
+}
+
+func handleMessages() {
+	for {
+		msg := <-broadcast
+		for client := range clients {
+			err := client.WriteJSON(msg)
+			if err != nil {
+				log.Printf("Error writing json: %v", err)
+				client.Close()
+				delete(clients, client)
+			}
+		}
 	}
 }

@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <title>Chat App</title>
     <style>
-        /* ทำให้ชื่อห้องเป็นสีน้ำเงินและขีดเส้นใต้ */
         .room-link {
             color: blue;
             text-decoration: underline;
@@ -45,6 +44,7 @@
     <script>
         let username = '';
         let roomId = null;
+        let socket;
 
         async function login() {
             username = document.getElementById('name').value;
@@ -64,14 +64,12 @@
             rooms.forEach(room => {
                 const li = document.createElement('li');
 
-                // สร้างลิงก์ชื่อห้องที่สามารถคลิกได้
                 const roomLink = document.createElement('span');
                 roomLink.textContent = `${room.name} - ${room.creator}`;
                 roomLink.classList.add('room-link');
                 roomLink.onclick = () => joinRoom(room.id, room.name);
                 li.appendChild(roomLink);
 
-                // เพิ่มปุ่มลบห้องสำหรับผู้สร้าง
                 if (room.creator === username) {
                     const deleteButton = document.createElement('span');
                     deleteButton.textContent = "Delete";
@@ -87,9 +85,12 @@
         async function createRoom() {
             const roomName = document.getElementById('room-name').value;
             const res = await fetch('/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName, creator: username }) });
-            if (res.ok) {
-                fetchRooms();
-            }
+            if (res.ok) fetchRooms();
+        }
+
+        async function deleteRoom(id) {
+            await fetch(`/rooms/${id}`, { method: 'DELETE' });
+            fetchRooms();
         }
 
         async function joinRoom(id, name) {
@@ -97,41 +98,53 @@
             document.getElementById('rooms').style.display = 'none';
             document.getElementById('chat').style.display = 'block';
             document.getElementById('room-title').textContent = `Room: ${name}`;
-            fetchMessages();
-        }
 
-        async function deleteRoom(id) {
-            const res = await fetch(`/rooms/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                fetchRooms();
-            }
+            // สร้าง WebSocket Connection
+            socket = new WebSocket(`ws://${window.location.host}/ws`);
+
+            socket.onopen = () => {
+                console.log('Connected to WebSocket');
+            };
+
+            socket.onmessage = event => {
+                const msg = JSON.parse(event.data);
+                displayMessage(msg);
+            };
+
+            fetchMessages();
         }
 
         async function fetchMessages() {
             const res = await fetch(`/rooms/${roomId}/messages`);
             const messages = await res.json();
-            const messagesDiv = document.getElementById('messages');
-            messagesDiv.innerHTML = '';
-            messages.forEach(msg => {
-                const div = document.createElement('div');
-                div.textContent = `${msg.sender}: ${msg.text}`;
-                messagesDiv.appendChild(div);
-            });
+            document.getElementById('messages').innerHTML = '';
+            messages.forEach(displayMessage);
         }
 
         async function sendMessage() {
             const text = document.getElementById('message').value;
             if (text.trim()) {
-                await fetch(`/rooms/${roomId}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sender: username, text }) });
+                const msg = { room_id: roomId, sender: username, text };
+
+                // ส่งข้อความผ่าน WebSocket
+                socket.send(JSON.stringify(msg));
+
                 document.getElementById('message').value = '';
-                fetchMessages();
             }
         }
 
+        function displayMessage(msg) {
+            const messagesDiv = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.textContent = `${msg.sender}: ${msg.text}`;
+            messagesDiv.appendChild(div);
+        }
+
         function leaveRoom() {
+            socket.close();
             document.getElementById('chat').style.display = 'none';
             document.getElementById('rooms').style.display = 'block';
-            roomId = null;
+            fetchRooms();
         }
     </script>
 </body>
