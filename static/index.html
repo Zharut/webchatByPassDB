@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Chat App</title>
+    <style>
+        /* ทำให้ชื่อห้องเป็นสีน้ำเงินและขีดเส้นใต้ */
+        .room-link {
+            color: blue;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .delete-button {
+            color: red;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="login">
+        <h2>Login</h2>
+        <input type="text" id="name" placeholder="Enter your name">
+        <button onclick="login()">Login</button>
+    </div>
+
+    <div id="rooms" style="display:none;">
+        <h2>Rooms</h2>
+        <input type="text" id="room-name" placeholder="Room name">
+        <button onclick="createRoom()">Create Room</button>
+        <ul id="room-list"></ul>
+    </div>
+
+    <div id="chat" style="display:none;">
+        <h2 id="room-title">Room</h2>
+        <div id="messages"></div>
+        <input type="text" id="message" placeholder="Type a message">
+        <button onclick="sendMessage()">Send</button>
+        <button onclick="leaveRoom()">Leave Room</button>
+    </div>
+
+    <script>
+        let username = '';
+        let roomId = null;
+
+        async function login() {
+            username = document.getElementById('name').value;
+            const res = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: username }) });
+            if (res.ok) {
+                document.getElementById('login').style.display = 'none';
+                document.getElementById('rooms').style.display = 'block';
+                fetchRooms();
+            }
+        }
+
+        async function fetchRooms() {
+            const res = await fetch('/rooms');
+            const rooms = await res.json();
+            const roomList = document.getElementById('room-list');
+            roomList.innerHTML = '';
+            rooms.forEach(room => {
+                const li = document.createElement('li');
+
+                // สร้างลิงก์ชื่อห้องที่สามารถคลิกได้
+                const roomLink = document.createElement('span');
+                roomLink.textContent = `${room.name} - ${room.creator}`;
+                roomLink.classList.add('room-link');
+                roomLink.onclick = () => joinRoom(room.id, room.name);
+                li.appendChild(roomLink);
+
+                // เพิ่มปุ่มลบห้องสำหรับผู้สร้าง
+                if (room.creator === username) {
+                    const deleteButton = document.createElement('span');
+                    deleteButton.textContent = "Delete";
+                    deleteButton.classList.add('delete-button');
+                    deleteButton.onclick = () => deleteRoom(room.id);
+                    li.appendChild(deleteButton);
+                }
+
+                roomList.appendChild(li);
+            });
+        }
+
+        async function createRoom() {
+            const roomName = document.getElementById('room-name').value;
+            const res = await fetch('/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName, creator: username }) });
+            if (res.ok) {
+                fetchRooms();
+            }
+        }
+
+        async function joinRoom(id, name) {
+            roomId = id;
+            document.getElementById('rooms').style.display = 'none';
+            document.getElementById('chat').style.display = 'block';
+            document.getElementById('room-title').textContent = `Room: ${name}`;
+            fetchMessages();
+        }
+
+        async function deleteRoom(id) {
+            const res = await fetch(`/rooms/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                fetchRooms();
+            }
+        }
+
+        async function fetchMessages() {
+            const res = await fetch(`/rooms/${roomId}/messages`);
+            const messages = await res.json();
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML = '';
+            messages.forEach(msg => {
+                const div = document.createElement('div');
+                div.textContent = `${msg.sender}: ${msg.text}`;
+                messagesDiv.appendChild(div);
+            });
+        }
+
+        async function sendMessage() {
+            const text = document.getElementById('message').value;
+            if (text.trim()) {
+                await fetch(`/rooms/${roomId}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sender: username, text }) });
+                document.getElementById('message').value = '';
+                fetchMessages();
+            }
+        }
+
+        function leaveRoom() {
+            document.getElementById('chat').style.display = 'none';
+            document.getElementById('rooms').style.display = 'block';
+            roomId = null;
+        }
+    </script>
+</body>
+
+</html>
